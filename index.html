@@ -1,0 +1,343 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Arbre local — recherche généalogique 100 % locale</title>
+<style>
+  :root { --bleu:#1d4ed8; --gris:#6b7280; --fond:#f8fafc; --bord:#e2e8f0; }
+  * { box-sizing:border-box; }
+  body { margin:0; font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif; background:var(--fond); color:#111827; }
+  .wrap { max-width:960px; margin:0 auto; padding:16px; }
+  header h1 { font-size:1.5rem; margin:8px 0 4px; }
+  header p.sub { color:var(--gris); margin:0 0 16px; font-size:.9rem; }
+  .card { background:#fff; border:1px solid var(--bord); border-radius:10px; padding:16px; margin-bottom:16px; }
+  .grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(160px,1fr)); gap:10px; }
+  label { display:block; font-size:.8rem; color:var(--gris); margin-bottom:3px; }
+  input[type=text], input[type=number] { width:100%; padding:8px 10px; border:1px solid var(--bord); border-radius:6px; font-size:.95rem; }
+  input:focus { outline:2px solid var(--bleu); border-color:transparent; }
+  button.primary { background:var(--bleu); color:#fff; border:none; border-radius:6px; padding:10px 22px; font-size:1rem; cursor:pointer; }
+  button.primary:disabled { background:#93c5fd; cursor:wait; }
+  button.small { background:#fff; color:var(--bleu); border:1px solid var(--bleu); border-radius:6px; padding:4px 10px; font-size:.8rem; cursor:pointer; margin:2px 4px 2px 0; }
+  button.small:hover { background:#eff6ff; }
+  table { width:100%; border-collapse:collapse; font-size:.88rem; }
+  th, td { text-align:left; padding:7px 8px; border-bottom:1px solid var(--bord); vertical-align:top; }
+  th { color:var(--gris); font-weight:600; font-size:.78rem; text-transform:uppercase; }
+  .status { font-size:.9rem; color:var(--gris); margin:8px 0; }
+  .err { background:#fef2f2; border:1px solid #fecaca; color:#991b1b; padding:10px; border-radius:6px; font-size:.9rem; white-space:pre-wrap; }
+  .notice { background:#fffbeb; border:1px solid #fde68a; color:#92400e; padding:10px; border-radius:6px; font-size:.85rem; margin-bottom:12px; }
+  .badge { display:inline-block; background:#eff6ff; color:var(--bleu); border-radius:99px; padding:1px 9px; font-size:.75rem; }
+  .crumbs { font-size:.85rem; margin-bottom:10px; }
+  .crumbs a { color:var(--bleu); cursor:pointer; text-decoration:underline; }
+  .config { font-size:.85rem; }
+  .config input { font-family:monospace; font-size:.85rem; }
+  details summary { cursor:pointer; color:var(--gris); font-size:.85rem; }
+  footer { color:var(--gris); font-size:.78rem; margin:24px 0; line-height:1.5; }
+  .spinner { display:inline-block; width:14px; height:14px; border:2px solid #c7d2fe; border-top-color:var(--bleu); border-radius:50%; animation:spin .8s linear infinite; vertical-align:middle; margin-right:6px; }
+  @keyframes spin { to { transform:rotate(360deg); } }
+  @media (max-width:640px){ .hide-sm { display:none; } }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>Arbre local</h1>
+    <p class="sub">Recherche dans les 29 millions de décès enregistrés en France depuis 1970.
+    La recherche s'exécute <strong>entièrement dans votre navigateur</strong> : le nom que vous
+    saisissez n'est envoyé à aucun serveur (vérifiable via F12 → Réseau).</p>
+  </header>
+
+  <div id="configCard" class="card config" style="display:none">
+    <label for="baseUrl">URL de base des données (dossier contenant les répertoires <code>lettre=A</code>…)</label>
+    <input type="text" id="baseUrl" placeholder="https://pub-xxxxx.r2.dev/parts">
+    <p style="font-size:.8rem;color:var(--gris)">Mémorisée localement dans votre navigateur. Exemple : <code>https://pub-xxxxx.r2.dev/parts</code></p>
+    <button class="primary" onclick="saveConfig()">Enregistrer</button>
+  </div>
+
+  <div class="card">
+    <form id="searchForm" onsubmit="event.preventDefault(); newSearch();">
+      <div class="grid">
+        <div><label for="nom">Nom *</label><input type="text" id="nom" required autocomplete="off"></div>
+        <div><label for="prenom">Prénom</label><input type="text" id="prenom" autocomplete="off"></div>
+        <div><label for="anneeMin">Né(e) de (année)</label><input type="number" id="anneeMin" min="1800" max="2030"></div>
+        <div><label for="anneeMax">à (année)</label><input type="number" id="anneeMax" min="1800" max="2030"></div>
+        <div><label for="commune">Commune de naissance</label><input type="text" id="commune" autocomplete="off"></div>
+        <div><label for="dept">Département (code)</label><input type="text" id="dept" maxlength="3" placeholder="ex : 29, 75, 971"></div>
+      </div>
+      <div style="margin-top:12px; display:flex; align-items:center; gap:16px; flex-wrap:wrap">
+        <button type="submit" class="primary" id="btnSearch" disabled>Initialisation…</button>
+        <label style="margin:0; font-size:.82rem; color:var(--gris)">
+          <input type="checkbox" id="variantes"> Inclure les variantes accentuées (MÜLLER/MULLER) — plus lent
+        </label>
+      </div>
+    </form>
+  </div>
+
+  <div id="crumbs" class="crumbs" style="display:none"></div>
+  <div id="notice" class="notice" style="display:none"></div>
+  <div id="status" class="status"></div>
+  <div id="error" class="err" style="display:none"></div>
+  <div class="card" id="resultsCard" style="display:none">
+    <div id="resultsMeta" class="status"></div>
+    <div style="overflow-x:auto"><table id="results">
+      <thead><tr><th>Nom</th><th>Prénoms</th><th class="hide-sm">Sexe</th><th>Né(e) le</th><th>À</th><th>Décédé(e) le</th><th>Actions</th></tr></thead>
+      <tbody></tbody>
+    </table></div>
+  </div>
+
+  <details class="card">
+    <summary>Comment ça marche, limites et sources</summary>
+    <footer>
+      <p><strong>Couverture</strong> : décès enregistrés en France depuis 1970 (fichier INSEE des personnes
+      décédées, agrégé par data.gouv.fr, Licence Ouverte 2.0). Les personnes décédées avant 1970 sont absentes.
+      Les lignes dont les proches se sont opposés à la rediffusion sont exclues.</p>
+      <p><strong>Architecture</strong> : le moteur SQL (DuckDB-WASM) s'exécute dans votre navigateur et ne
+      télécharge que les plages d'octets nécessaires des fichiers Parquet, via HTTP Range Requests. Le serveur
+      qui héberge les fichiers ne voit jamais le nom recherché.</p>
+      <p><strong>Filiations</strong> : le bouton « Remonter d'une génération » propose des <em>pistes</em>
+      (même patronyme, même commune, né 20 à 40 ans plus tôt), jamais des filiations établies. Seul l'acte
+      d'état civil fait foi.</p>
+      <p><strong>Annuaire des archives</strong> : Ministère de la Culture / FranceArchives, Licence Ouverte 2.0.</p>
+    </footer>
+  </details>
+</div>
+
+<script type="module">
+/* ===== Configuration ===== */
+const DEFAULT_BASE_URL = "https://raw.githubusercontent.com/xensma/arbre-local/main/parts";
+let BASE_URL = localStorage.getItem("arbre_base_url") || DEFAULT_BASE_URL;
+
+/* ===== Annuaire des Archives départementales (intégré, ~110 entrées) ===== */
+const ARCHIVES = [{"dept": "01", "service": "Archives départementales de l'Ain", "courriel": "archives.departementales@ain.fr", "site": "https://www.archives.ain.fr/"}, {"dept": "02", "service": "Archives départementales de l'Aisne", "courriel": "archives@aisne.fr", "site": "https://archives.aisne.fr/"}, {"dept": "03", "service": "Archives départementales de l'Allier", "courriel": "archives@allier.fr", "site": "https://archives.allier.fr/"}, {"dept": "04", "service": "Archives départementales des Alpes-de-Haute-Provence", "courriel": "archives04@le04.fr", "site": "http://www.archives04.fr/"}, {"dept": "05", "service": "Archives départementales des Hautes-Alpes", "courriel": "archives05@hautes-alpes.fr", "site": "https://archives.hautes-alpes.fr/"}, {"dept": "06", "service": "Archives départementales des Alpes-Maritimes", "courriel": "dad@departement06.fr", "site": "https://archives06.fr/"}, {"dept": "07", "service": "Archives départementales de l'Ardèche", "courriel": "archives@ardeche.fr", "site": "http://archives.ardeche.fr/"}, {"dept": "08", "service": "Archives départementales des Ardennes", "courriel": "archives@cd08.fr", "site": "http://archives.cd08.fr"}, {"dept": "09", "service": "Archives départementales de l'Ariège", "courriel": "arcdir@ariege.fr", "site": "http://archives.ariege.fr/"}, {"dept": "10", "service": "Archives départementales de l'Aube", "courriel": "archpat.aube@aube.fr", "site": "http://www.archives-aube.fr/"}, {"dept": "11", "service": "Archives départementales de l'Aude", "courriel": "archives@aude.fr", "site": "https://archivesdepartementales.aude.fr/"}, {"dept": "12", "service": "Archives départementales de l'Aveyron", "courriel": "archives@aveyron.fr", "site": "http://archives.aveyron.fr"}, {"dept": "13", "service": "Archives départementales des Bouches-du-Rhône", "courriel": "archives13@departement13.fr", "site": "http://www.archives13.fr/"}, {"dept": "14", "service": "Archives départementales du Calvados", "courriel": "archives@calvados.fr", "site": "https://archives.calvados.fr/"}, {"dept": "15", "service": "Archives départementales du Cantal", "courriel": "archives@cantal.fr", "site": "http://archives.cantal.fr"}, {"dept": "16", "service": "Archives départementales de la Charente", "courriel": "archives16@lacharente.fr", "site": "https://lasource.archives.lacharente.fr/"}, {"dept": "17", "service": "Archives départementales de Charente-Maritime - Site de Jonzac", "courriel": "archivesjonzac@charente-maritime.fr", "site": null}, {"dept": "17", "service": "Archives départementales de Charente-Maritime", "courriel": "archives@charente-maritime.fr", "site": "https://archives.charente-maritime.fr/"}, {"dept": "18", "service": "Archives départementales du Cher", "courriel": "direction.archives@departement18.fr", "site": "http://www.archives18.fr/"}, {"dept": "19", "service": "Archives départementales de la Corrèze", "courriel": "archive19@correze.fr", "site": "http://www.archives.correze.fr/"}, {"dept": "21", "service": "Bâtiment annexe de la Côte d'Or", "courriel": "archives@cotedor.fr", "site": "http://www.archives.cotedor.fr/"}, {"dept": "21", "service": "Archives départementales de Côte-d'Or", "courriel": "archives@cotedor.fr", "site": "https://archives.cotedor.fr/v2/site/ad21/"}, {"dept": "22", "service": "Archives départementales des Côtes-d'Armor", "courriel": "archives@cotesdarmor.fr", "site": "http://archives.cotesdarmor.fr/"}, {"dept": "23", "service": "Archives départementales de la Creuse", "courriel": "archives@creuse.fr", "site": "http://archives.creuse.fr"}, {"dept": "24", "service": "Archives départementales de la Dordogne", "courriel": "cd24.archives@dordogne.fr", "site": "https://archives.dordogne.fr/"}, {"dept": "25", "service": "Archives départementales du Doubs", "courriel": "archives.departementales@doubs.fr", "site": "https://archives.doubs.fr/"}, {"dept": "26", "service": "Archives départementales de la Drôme", "courriel": "archives@ladrome.fr", "site": "https://archives.ladrome.fr/"}, {"dept": "27", "service": "Archives départementales de l'Eure", "courriel": "archives@eure.fr", "site": "http://archives.eure.fr/"}, {"dept": "28", "service": "Archives départementales d'Eure-et-Loir", "courriel": "archives@eurelien.fr", "site": "http://www.archives28.fr"}, {"dept": "29", "service": "Archives départementales du Finistère", "courriel": "archives.departementales@finistere.fr", "site": "https://archives.finistere.fr/"}, {"dept": "2A", "service": "Archives Pumonti à Ajaccio", "courriel": "archivii.pumonti@isula.corsica", "site": null}, {"dept": "2B", "service": "Direction des Archives de Corse", "courriel": "archivii.cismonte@isula.corsica", "site": "http://archives.isula.corsica"}, {"dept": "30", "service": "Archives départementales du Gard", "courriel": "archives@gard.fr", "site": "https://archives.gard.fr"}, {"dept": "30", "service": "Archives départementales du Jura", "courriel": "archives-jura@jura.fr", "site": "https://archives39.fr/"}, {"dept": "31", "service": "Antenne de Saint-Gaudens", "courriel": "antenne-archives@cd31.fr", "site": null}, {"dept": "31", "service": "Archives départementales de la Haute-Garonne", "courriel": "archives@cd31.fr", "site": "http://www.archives.haute-garonne.fr/"}, {"dept": "32", "service": "Archives départementales du Gers", "courriel": "archives32@gers.fr", "site": "http://www.archives32.fr/"}, {"dept": "33", "service": "Archives départementales de la Gironde", "courriel": "archives.gironde@gironde.fr", "site": "http://archives.gironde.fr/"}, {"dept": "34", "service": "Archives départementales de l'Hérault", "courriel": "archives@herault.fr", "site": "https://pierresvives.herault.fr/"}, {"dept": "35", "service": "Archives départementales d’Ille-et-Vilaine", "courriel": "archives@ille-et-vilaine.fr", "site": "http://archives.ille-et-vilaine.fr/"}, {"dept": "36", "service": "Archives départementales de l'Indre", "courriel": "archives.indre@indre.fr", "site": "https://www.archives36.fr/vos-recherches/guide-du-chercheur"}, {"dept": "37", "service": "Archives départementales d'Indre-et-Loire", "courriel": "archives@departement-touraine.fr", "site": "https://archives.touraine.fr/"}, {"dept": "38", "service": "Archives départementales de l'Isère", "courriel": "archives-departementales@isere.fr", "site": "https://archives.isere.fr/"}, {"dept": "40", "service": "Archives départementales des Landes", "courriel": "archives@landes.fr", "site": "https://archives.landes.fr/"}, {"dept": "41", "service": "Archives départementales de Loir-et-Cher - Site des archives historiques", "courriel": "archives.departementales@departement41.fr", "site": "http://www.culture41.fr/Archives-departementales"}, {"dept": "42", "service": "Archives départementales de la Loire", "courriel": "archives@loire.fr", "site": "https://archives.loire.fr/"}, {"dept": "43", "service": "Archives départementales de la Haute-Loire", "courriel": "archives@hauteloire.fr", "site": "https://www.archives43.fr/aides-a-la-recherche/formulaire-de-recherche-dans-les-inventaires"}, {"dept": "44", "service": "Archives départementales de la Loire-Atlantique", "courriel": "archives@loire-atlantique.fr", "site": "https://archives.loire-atlantique.fr/44/accueil-archives/j_6"}, {"dept": "45", "service": "Archives départementales du Loiret", "courriel": "dad@loiret.fr", "site": "http://www.archives-loiret.fr"}, {"dept": "46", "service": "Archives départementales du Lot", "courriel": "archives@lot.fr", "site": "http://archives.lot.fr/"}, {"dept": "47", "service": "Archives départementales de Lot-et-Garonne", "courriel": "archives@lotetgaronne.fr", "site": "https://archivesdepartementales.lotetgaronne.fr/accueil"}, {"dept": "48", "service": "Archives départementales de la Lozère", "courriel": "archives@lozere.fr", "site": "http://archives.lozere.fr"}, {"dept": "49", "service": "Archives départementales de Maine-et-Loire", "courriel": "archives49@maine-et-loire.fr", "site": "http://www.archives49.fr/"}, {"dept": "50", "service": "Archives départementales de la Manche", "courriel": "archives50@manche.fr", "site": "https://www.archives-manche.fr"}, {"dept": "51", "service": "Archives départementales de la Marne - Centre de Reims", "courriel": "archives51reims@marne.fr", "site": null}, {"dept": "51", "service": "Archives départementales de la Marne", "courriel": "archives51@marne.fr", "site": "https://archives.marne.fr/"}, {"dept": "52", "service": "Archives départementales de la Haute-Marne", "courriel": "archives.departementales@haute-marne.fr", "site": "https://archives.haute-marne.fr/"}, {"dept": "53", "service": "Archives départementales de la Mayenne", "courriel": "archives@lamayenne.fr", "site": "https://archives.lamayenne.fr/"}, {"dept": "54", "service": "Archives départementales de Meurthe-et-Moselle", "courriel": "archives54@departement54.fr", "site": "https://archives.meurthe-et-moselle.fr/"}, {"dept": "55", "service": "Archives départementales de la Meuse", "courriel": "archives@meuse.fr", "site": "http://archives.meuse.fr"}, {"dept": "56", "service": "Archives départementales du Morbihan", "courriel": "archives@morbihan.fr", "site": "https://patrimoines-archives.morbihan.fr/"}, {"dept": "57", "service": "Archives départementales de la Moselle", "courriel": "archives@moselle.fr", "site": "http://www.archives57.com/"}, {"dept": "57", "service": "Centre des archives industrielles et techniques de la Moselle (CAITM)", "courriel": "archives@moselle.fr", "site": null}, {"dept": "58", "service": "Archives départementales de la Nièvre", "courriel": "archives@nievre.fr", "site": "https://archives.nievre.fr/"}, {"dept": "59", "service": "Archives départementales du Nord", "courriel": "archivedep@lenord.fr", "site": "https://archivesdepartementales.lenord.fr"}, {"dept": "60", "service": "Archives départementales de l'Oise", "courriel": "archives@oise.fr", "site": "https://archives.oise.fr/"}, {"dept": "61", "service": "Archives départementales de l'Orne", "courriel": "archives@orne.fr", "site": "http://archives.orne.fr/"}, {"dept": "62", "service": "Archives départementales du Pas-de-Calais", "courriel": "archives62@pasdecalais.fr", "site": "https://archivespasdecalais.fr/"}, {"dept": "63", "service": "Archives départementales du Puy-de-Dôme", "courriel": "archives@puy-de-dome.fr", "site": "http://www.archivesdepartementales.puydedome.fr/"}, {"dept": "64", "service": "Pôle d'archives de Bayonne et du Pays basque", "courriel": "arch-bay@le64.fr", "site": "http://archives.le64.fr"}, {"dept": "64", "service": "Archives départementales des Pyrénées-Atlantiques", "courriel": "archives@le64.fr", "site": "http://archives.le64.fr"}, {"dept": "66", "service": "Archives départementales des Pyrénées-Orientales", "courriel": "archives@cd66.fr", "site": "https://www.ledepartement66.fr/lesarchivesenligne/"}, {"dept": "67", "service": "Archives de la Collectivité européenne d'Alsace - Site de Strasbourg (anciennement Archives du Bas-Rhin)", "courriel": "archives@bas-rhin.fr", "site": "https://archives.alsace.eu/"}, {"dept": "68", "service": "Archives de la Collectivité européenne d'Alsace - Site de Colmar (anciennement Archives du Haut-Rhin)", "courriel": "archives@haut-rhin.fr", "site": "https://archives.alsace.eu/"}, {"dept": "69", "service": "Archives départementales du Rhône et de la métropole de Lyon", "courriel": "archives@rhone.fr", "site": "http://archives.rhone.fr/"}, {"dept": "70", "service": "Archives départementales de la Haute-Saône", "courriel": "archives@haute-saone.fr", "site": "http://archives.haute-saone.fr/"}, {"dept": "71", "service": "Archives départementales de Saône-et-Loire", "courriel": "archives@saoneetloire71.fr", "site": "http://www.archives71.fr/"}, {"dept": "72", "service": "Archives départementales de la Sarthe", "courriel": "archives@sarthe.fr", "site": "http://www.archives.sarthe.com/"}, {"dept": "73", "service": "Archives départementales de la Savoie", "courriel": "archives@savoie.fr", "site": "https://patrimoines.savoie.fr/web/dsp_6165/accueil"}, {"dept": "74", "service": "Archives départementales de la Haute-Savoie", "courriel": "archedep@hautesavoie.fr", "site": "https://archives.hautesavoie.fr/"}, {"dept": "75", "service": "Archives de Paris", "courriel": "dac.archives@paris.fr", "site": "https://archives.paris.fr/"}, {"dept": "76", "service": "Archives départementales de la Seine-Maritime", "courriel": "archives@seinemaritime.fr", "site": "http://www.archivesdepartementales76.net"}, {"dept": "76", "service": "Pôle archives contemporaines", "courriel": "archiveshdd@seinemaritime.fr", "site": null}, {"dept": "77", "service": "Archives départementales de Seine-et-Marne", "courriel": "archives@departement77.fr", "site": "http://archives.seine-et-marne.fr"}, {"dept": "78", "service": "Direction des Archives départementales des Yvelines", "courriel": "archives@yvelines.fr", "site": "https://archives.yvelines.fr/"}, {"dept": "79", "service": "Archives départementales des Deux-Sèvres", "courriel": "archives@deux-sevres.fr", "site": "https://archives-deux-sevres-vienne.fr/"}, {"dept": "80", "service": "Archives départementales de la Somme", "courriel": "archives@somme.fr", "site": "http://archives.somme.fr/"}, {"dept": "81", "service": "Archives départementales du Tarn", "courriel": "archives.tarn@tarn.fr", "site": "https://archives.tarn.fr/accueil"}, {"dept": "82", "service": "Archives départementales de Tarn-et-Garonne", "courriel": "archives@ledepartement82.fr", "site": "http://www.archives82.fr/"}, {"dept": "83", "service": "Archives départementales du Var", "courriel": "ad83@var.fr", "site": "https://archives.var.fr/"}, {"dept": "84", "service": "Archives départementales de Vaucluse - MEMENTO – Pôle des Patrimoines de Vaucluse", "courriel": "archives84@vaucluse.fr", "site": "http://archives.vaucluse.fr"}, {"dept": "85", "service": "Archives départementales de la Vendée", "courriel": "archives@vendee.fr", "site": "https://archives.vendee.fr"}, {"dept": "86", "service": "Archives départementales de la Vienne", "courriel": "archives@departement86.fr", "site": "https://archives-deux-sevres-vienne.fr/"}, {"dept": "87", "service": "Archives départementales de la Haute-Vienne", "courriel": "contact.archives@haute-vienne.fr", "site": "http://archives.haute-vienne.fr"}, {"dept": "88", "service": "Archives départementales des Vosges", "courriel": "vosges-archives@vosges.fr", "site": "https://archives.vosges.fr/"}, {"dept": "89", "service": "Archives départementales de l'Yonne", "courriel": "archives@yonne.fr", "site": "http://www.yonne-archives.fr"}, {"dept": "90", "service": "Archives départementales du Territoire de Belfort", "courriel": "archives@territoiredebelfort.fr", "site": "https://archives.territoiredebelfort.fr"}, {"dept": "91", "service": "Archives départementales de l'Essonne", "courriel": "archi91@cd-essonne.fr ", "site": "https://archives.essonne.fr/"}, {"dept": "92", "service": "Archives départementales des Hauts-de-Seine", "courriel": "archivesdepartementales@hauts-de-seine.fr", "site": "http://archives.hauts-de-seine.fr"}, {"dept": "93", "service": "Archives départementales de la Seine-Saint-Denis", "courriel": "ad93@seinesaintdenis.fr", "site": "https://archives.seinesaintdenis.fr/"}, {"dept": "94", "service": "Archives départementales du Val-de-Marne", "courriel": "archives@valdemarne.fr", "site": "http://archives.valdemarne.fr/"}, {"dept": "95", "service": "Archives départementales du Val-d'Oise", "courriel": "archives.publics@valdoise.fr", "site": "https://archives.valdoise.fr/"}, {"dept": "971", "service": "Archives départementales de la Guadeloupe", "courriel": "archives@cg971.fr", "site": "http://www.archivesguadeloupe.fr/"}, {"dept": "972", "service": "Archives Territoriales de Martinique", "courriel": "archives@collectivitedemartinique.mq", "site": "https://www.patrimoines-martinique.org/"}, {"dept": "973", "service": "Archives territoriales de Guyane", "courriel": "archives@ctguyane.fr", "site": "http://archives.ctguyane.fr/4DCGI/Web_Custompage/index.shtm/ILUMP1565"}, {"dept": "974", "service": "Service d'archives de Saint-Pierre-et-Miquelon", "courriel": "arche@ct975.fr", "site": "http://www.arche-musee-et-archives.net/fr"}, {"dept": "974", "service": "Archives départementales de la Réunion", "courriel": "archives.departementales@cg974.fr", "site": "https://www.departement974.fr/sites-culturels/index.php/Archives/pr%C3%A9sentation-archives/archives-departementales.html"}, {"dept": "976", "service": "Archives départementales de Mayotte", "courriel": "archives.mayotte@cg976.fr", "site": "https://www.mayotte.fr/le-conseil-departemental/institution/services-administratifs/archives"}, {"dept": "978", "service": "Archives territoriales de Saint-Martin", "courriel": "archivesterritoriales@com-saint-martin.fr", "site": null}, {"dept": "98", "service": "Territoire de Polynésie française. Service du patrimoine archivistique et audiovisuel", "courriel": "service.archives@archives.gov.pf", "site": "http://www.archives.pf/"}, {"dept": "98", "service": "Collectivité d'outre-mer de Nouvelle-Calédonie", "courriel": "archives@gouv.nc", "site": "http://www.archives.gouv.nc/"}];
+
+/* ===== État ===== */
+let db = null, conn = null, ready = false;
+let crumbs = []; // fil de navigation généalogique
+
+const $ = id => document.getElementById(id);
+
+function showConfigIfNeeded() {
+  if (!BASE_URL) {
+    $("configCard").style.display = "block";
+    $("status").textContent = "Configurez d'abord l'URL des données ci-dessus.";
+  }
+}
+window.saveConfig = () => {
+  const v = $("baseUrl").value.trim().replace(/\/+$/, "");
+  if (!v) return;
+  localStorage.setItem("arbre_base_url", v);
+  BASE_URL = v;
+  $("configCard").style.display = "none";
+  $("status").textContent = "URL enregistrée.";
+};
+
+/* ===== Initialisation DuckDB-WASM (au chargement, pas à la 1re recherche) ===== */
+async function init() {
+  showConfigIfNeeded();
+  try {
+    const duckdb = await import("https://cdn.jsdelivr.net/npm/@duckdb/duckdb-wasm@1.29.0/+esm");
+    const bundles = duckdb.getJsDelivrBundles();
+    const bundle = await duckdb.selectBundle(bundles);
+    const workerUrl = URL.createObjectURL(new Blob(
+      [`importScripts("${bundle.mainWorker}");`], { type: "text/javascript" }));
+    const worker = new Worker(workerUrl);
+    db = new duckdb.AsyncDuckDB(new duckdb.VoidLogger(), worker);
+    await db.instantiate(bundle.mainModule, bundle.pthreadWorker);
+    URL.revokeObjectURL(workerUrl);
+    conn = await db.connect();
+    ready = true;
+    $("btnSearch").disabled = false;
+    $("btnSearch").textContent = "Rechercher";
+    if (BASE_URL) $("status").textContent = "Moteur prêt. La recherche se fait localement, dans ce navigateur.";
+  } catch (e) {
+    showError("Échec d'initialisation du moteur SQL : " + e.message);
+  }
+}
+
+/* ===== Utilitaires ===== */
+const esc = s => s.replace(/'/g, "''");
+const stripAccents = s => s.normalize("NFD").replace(/[̀-ͯ]/g, "");
+const fmtDate = d => (d && d.length === 8) ? `${d.slice(6,8)}/${d.slice(4,6)}/${d.slice(0,4)}` : (d || "—");
+const htmlEsc = s => String(s ?? "").replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+
+function partitionFor(nom) {
+  const c = nom.charAt(0);
+  return (c >= "A" && c <= "Z") ? c : "AUTRE";
+}
+function deptOf(codeInsee) {
+  if (!codeInsee) return null;
+  return codeInsee.startsWith("97") || codeInsee.startsWith("98")
+    ? codeInsee.slice(0, 3) : codeInsee.slice(0, 2);
+}
+function showError(msg) { $("error").textContent = msg; $("error").style.display = "block"; }
+function clearError() { $("error").style.display = "none"; }
+
+/* ===== Recherche ===== */
+window.newSearch = () => { crumbs = []; renderCrumbs(); $("notice").style.display = "none"; runSearch(); };
+
+async function runSearch(genealogyLabel) {
+  clearError();
+  if (!BASE_URL) { showConfigIfNeeded(); return; }
+  if (!ready) { showError("Le moteur n'est pas encore initialisé."); return; }
+
+  const nomRaw = $("nom").value.trim();
+  if (!nomRaw) return;
+  const nom = nomRaw.toUpperCase();
+  const variantes = $("variantes").checked;
+  const prenom = $("prenom").value.trim();
+  const aMin = $("anneeMin").value, aMax = $("anneeMax").value;
+  const commune = $("commune").value.trim();
+  const dept = $("dept").value.trim();
+
+  const letter = partitionFor(variantes ? stripAccents(nom) : nom);
+  const files = [`${BASE_URL}/lettre%3D${letter}/data.parquet`];
+  if (variantes && letter !== "AUTRE") files.push(`${BASE_URL}/lettre%3DAUTRE/data.parquet`);
+
+  const nomCond = variantes
+    ? `strip_accents(nom) = strip_accents('${esc(nom)}')`
+    : `nom = '${esc(nom)}'`;
+  const conds = [nomCond];
+  if (prenom) conds.push(variantes
+    ? `strip_accents(upper(prenoms)) LIKE '%' || strip_accents(upper('${esc(prenom)}')) || '%'`
+    : `upper(prenoms) LIKE '%' || upper('${esc(prenom)}') || '%'`);
+  if (aMin) conds.push(`substr(date_naissance,1,4) >= '${esc(aMin)}'`);
+  if (aMax) conds.push(`substr(date_naissance,1,4) <= '${esc(aMax)}'`);
+  if (commune) conds.push(`upper(commune_naissance) LIKE '%' || upper('${esc(commune)}') || '%'`);
+  if (dept) conds.push(dept.length === 3
+    ? `substr(code_insee_naissance,1,3) = '${esc(dept)}'`
+    : `substr(code_insee_naissance,1,2) = '${esc(dept.padStart(2,"0"))}'`);
+
+  const from = files.map(f => `SELECT * FROM read_parquet('${f}')`).join(" UNION ALL ");
+  const sql = `
+    SELECT nom, prenoms, sexe, date_naissance, code_insee_naissance, commune_naissance,
+           pays_naissance, date_deces, code_insee_deces, count(*) OVER () AS total
+    FROM (${from})
+    WHERE ${conds.join(" AND ")}
+    ORDER BY date_naissance
+    LIMIT 100`;
+
+  $("btnSearch").disabled = true;
+  $("status").innerHTML = '<span class="spinner"></span>Recherche en cours (téléchargement des blocs nécessaires)…';
+  $("resultsCard").style.display = "none";
+  const t0 = performance.now();
+  try {
+    const res = await conn.query(sql);
+    renderResults(res.toArray().map(r => r.toJSON()), performance.now() - t0, genealogyLabel);
+  } catch (e) {
+    $("status").textContent = "";
+    showError("Erreur de requête : " + e.message +
+      "\nVérifiez l'URL des données et la politique CORS du bucket (ExposeHeaders).");
+  } finally {
+    $("btnSearch").disabled = false;
+  }
+}
+
+function renderResults(rows, ms, genealogyLabel) {
+  const tbody = $("results").querySelector("tbody");
+  tbody.innerHTML = "";
+  const total = rows.length ? Number(rows[0].total) : 0;
+  $("status").textContent = "";
+  $("resultsCard").style.display = "block";
+  const label = genealogyLabel ? ` — <strong>${htmlEsc(genealogyLabel)}</strong> <span class="badge">hypothèses à vérifier par l'acte</span>` : "";
+  $("resultsMeta").innerHTML = total === 0
+    ? "Aucun résultat. Essayez sans prénom, avec les variantes accentuées, ou élargissez les années."
+    : `<strong>${total.toLocaleString("fr-FR")}</strong> résultat(s)` +
+      (total > 100 ? " — 100 premiers affichés, affinez avec les filtres" : "") +
+      ` <span class="badge">${(ms/1000).toFixed(1)} s</span>${label}`;
+
+  rows.forEach((r, i) => {
+    const tr = document.createElement("tr");
+    const lieu = r.commune_naissance || r.pays_naissance || "—";
+    tr.innerHTML =
+      `<td><strong>${htmlEsc(r.nom)}</strong></td>` +
+      `<td>${htmlEsc(r.prenoms || "—")}</td>` +
+      `<td class="hide-sm">${htmlEsc(r.sexe === "1" || r.sexe === "M" ? "M" : "F")}</td>` +
+      `<td>${fmtDate(r.date_naissance)}</td>` +
+      `<td>${htmlEsc(lieu)}</td>` +
+      `<td>${fmtDate(r.date_deces)}</td>` +
+      `<td></td>`;
+    const cell = tr.lastElementChild;
+    const b1 = document.createElement("button");
+    b1.className = "small"; b1.textContent = "Demander l'acte";
+    b1.onclick = () => requestActe(r);
+    const b2 = document.createElement("button");
+    b2.className = "small"; b2.textContent = "Remonter d'une génération";
+    b2.onclick = () => upOneGeneration(r);
+    cell.append(b1, b2);
+    tbody.appendChild(tr);
+  });
+}
+
+/* ===== Bouton « demander l'acte » ===== */
+function requestActe(r) {
+  const dept = deptOf(r.code_insee_naissance);
+  const entry = ARCHIVES.find(a => a.dept === dept);
+  const birthYear = parseInt((r.date_naissance || "").slice(0, 4), 10);
+  const recent = birthYear && (new Date().getFullYear() - birthYear) < 75;
+
+  let note = "";
+  if (recent) {
+    note = "⚠️ Acte de naissance de moins de 75 ans : en France, il faut s'adresser à la <strong>mairie de la commune de naissance</strong> et justifier de sa filiation (règle des 75 ans). Les Archives départementales ne pourront pas le délivrer. ";
+  }
+  if (!entry) {
+    note += dept
+      ? `Aucune adresse de courriel connue pour les Archives départementales du ${dept}.`
+      : "Département de naissance inconnu (personne probablement née à l'étranger) : adressez-vous au Service central d'état civil de Nantes (ministère de l'Europe et des Affaires étrangères).";
+    $("notice").innerHTML = note;
+    $("notice").style.display = "block";
+    return;
+  }
+  if (note) { $("notice").innerHTML = note + `Coordonnées trouvées : ${htmlEsc(entry.service)}` + (entry.site ? ` — <a href="${htmlEsc(entry.site)}" target="_blank" rel="noopener">site</a>` : ""); $("notice").style.display = "block"; if (recent) return; }
+
+  const subject = "Demande de copie d'acte de naissance";
+  const body = `Madame, Monsieur,
+
+Je souhaite obtenir une copie de l'acte de naissance de :
+
+Nom : ${r.nom}
+Prénoms : ${r.prenoms || ""}
+Né(e) le : ${fmtDate(r.date_naissance)}
+À : ${r.commune_naissance || ""}
+
+Je vous remercie par avance.
+
+Cordialement,`;
+  location.href = `mailto:${entry.courriel}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
+}
+
+/* ===== Remonter d'une génération ===== */
+function upOneGeneration(r) {
+  const y = parseInt((r.date_naissance || "").slice(0, 4), 10);
+  if (!y || !r.commune_naissance) {
+    $("notice").textContent = "Commune ou année de naissance manquante : impossible de proposer des parents.";
+    $("notice").style.display = "block";
+    return;
+  }
+  crumbs.push({ nom: r.nom, prenoms: r.prenoms, annee: y });
+  renderCrumbs();
+  $("nom").value = r.nom;
+  $("prenom").value = "";
+  $("anneeMin").value = y - 40;
+  $("anneeMax").value = y - 20;
+  $("commune").value = r.commune_naissance;
+  $("dept").value = "";
+  $("notice").innerHTML = `Recherche de <strong>parents possibles</strong> de ${htmlEsc(r.prenoms ? r.prenoms.split(",")[0] : "")} ${htmlEsc(r.nom)} (né(e) en ${y} à ${htmlEsc(r.commune_naissance)}) : même patronyme, même commune, né(e)s entre ${y-40} et ${y-20}. Il s'agit d'une <strong>hypothèse</strong> fondée sur le nom et le lieu — seul l'acte d'état civil fait foi.`;
+  $("notice").style.display = "block";
+  runSearch(`parents possibles (génération −${crumbs.length})`);
+}
+
+function renderCrumbs() {
+  const el = $("crumbs");
+  if (!crumbs.length) { el.style.display = "none"; return; }
+  el.style.display = "block";
+  el.innerHTML = "Fil de navigation : " + crumbs.map((c, i) =>
+    `<a onclick="jumpCrumb(${i})">${htmlEsc((c.prenoms||"").split(",")[0])} ${htmlEsc(c.nom)} (${c.annee})</a>`
+  ).join(" → ") + ` <button class="small" onclick="crumbsReset()">réinitialiser</button>`;
+}
+window.jumpCrumb = i => { crumbs = crumbs.slice(0, i + 1); renderCrumbs(); };
+window.crumbsReset = () => { crumbs = []; renderCrumbs(); $("notice").style.display = "none"; };
+
+init();
+</script>
+</body>
+</html>
